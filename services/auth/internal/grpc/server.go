@@ -8,8 +8,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	authpb "github.com/ybotet/pz3_logr/gen/proto/auth"
-	"github.com/ybotet/pz3_logr/services/auth/internal/auth"
+	authpb "github.com/ybotet/pz5_https_sql/gen/proto/auth"
+	"github.com/ybotet/pz5_https_sql/services/auth/internal/auth"
 )
 
 type Server struct {

@@ -1,19 +1,17 @@
 package main
 
 import (
-	"net/http"
-	"os"
+    "net/http"
+    "os"
 
-	"github.com/gorilla/mux"
-	"github.com/ybotet/pz3_logr/services/tasks/internal/clients"
-	"github.com/ybotet/pz3_logr/services/tasks/internal/handlers"
+    "github.com/gorilla/mux"
+    "github.com/ybotet/pz5_https_sql/services/tasks/internal/clients"
+    "github.com/ybotet/pz5_https_sql/services/tasks/internal/handlers"
+    "github.com/ybotet/pz5_https_sql/services/tasks/internal/repository"
 
-	// Алиас для внутреннего middleware (tasks)
-	internalMiddleware "github.com/ybotet/pz3_logr/services/tasks/internal/middleware"
-
-	// Общие пакеты
-	"github.com/ybotet/pz3_logr/shared/logger"
-	"github.com/ybotet/pz3_logr/shared/middleware" // общий middleware
+    internalMiddleware "github.com/ybotet/pz5_https_sql/services/tasks/internal/middleware"
+    "github.com/ybotet/pz5_https_sql/shared/logger"
+    "github.com/ybotet/pz5_https_sql/shared/middleware"
 )
 
 func main() {
@@ -33,30 +31,46 @@ func main() {
         LogLevel:    "debug",
         JSONFormat:  true,
     })
-    
-    // Роутер
-    r := mux.NewRouter()
-    
-    // Middleware из SHARED (RequestID и Logging)
-    r.Use(middleware.RequestID)      // ✅ Из общего middleware
-    r.Use(middleware.Logging(log))   // ✅ Из общего middleware
 
-    // Подключение к Auth service
+    // Conectar a PostgreSQL
+    db, err := repository.NewPostgresConnection()
+    if err != nil {
+        log.Fatalf("Error conectando a PostgreSQL: %v", err)
+    }
+    defer db.Close()
+
+    // Crear repositorio
+    taskRepo := repository.NewPostgresTaskRepository(db)
+
+    // Router
+    r := mux.NewRouter()
+
+    // Middleware
+    r.Use(middleware.RequestID)
+    r.Use(middleware.Logging(log))
+
+    // Conectar a Auth service
     authClient, err := clients.NewAuthClient(authAddr)
     if err != nil {
-        log.Fatalf("Ошибка подключения к Auth service: %v", err)
+        log.Fatalf("Error conectando a Auth service: %v", err)
     }
     defer authClient.Close()
 
-    // Создание middleware и обработчиков
-    // Используем internalMiddleware (с алиасом) для NewAuthMiddleware
-    authMiddleware := internalMiddleware.NewAuthMiddleware(authClient.GetClient())  // ✅ Изменено
-    taskHandler := handlers.NewTaskHandler()
+    // Middleware de autenticaci?n
+    authMiddleware := internalMiddleware.NewAuthMiddleware(authClient.GetClient())
+    taskHandler := handlers.NewTaskHandler(taskRepo)
 
-    // Настройка маршрутов
-    r.HandleFunc("/tasks", authMiddleware.Authenticate(taskHandler.GetTasks)).Methods("GET")
-    r.HandleFunc("/tasks", authMiddleware.Authenticate(taskHandler.CreateTask)).Methods("POST")
+    // Rutas
+    r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("OK"))
+    }).Methods("GET")
 
-    log.Printf("Сервер Tasks слушает порт %s", tasksPort)
+    r.HandleFunc("/v1/tasks", authMiddleware.Authenticate(taskHandler.GetTasks)).Methods("GET")
+    r.HandleFunc("/v1/tasks", authMiddleware.Authenticate(taskHandler.CreateTask)).Methods("POST")
+    r.HandleFunc("/v1/tasks/search/vulnerable", authMiddleware.Authenticate(taskHandler.SearchTasksVulnerable)).Methods("GET")
+    r.HandleFunc("/v1/tasks/search", authMiddleware.Authenticate(taskHandler.SearchTasks)).Methods("GET")
+
+    log.Printf("Servidor Tasks escuchando en puerto %s", tasksPort)
     log.Fatal(http.ListenAndServe(":"+tasksPort, r))
 }
